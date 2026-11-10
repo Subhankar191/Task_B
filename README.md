@@ -8,14 +8,14 @@ Built with **Python**, **OpenCV** (colour analysis, scoring, Haar eye detection)
 
 ## Features
 
-- **Guided capture with a live, eye-following oval:** The live camera preview shows an oval that locks onto the eye whose lower-lid conjunctiva is reddest, rotates with head tilt, and changes colour to show whether the conjunctiva is clear. A configurable hold countdown (default 5 seconds) runs during recording.
-- **Video recording:** The full hold period is recorded as a video (`.webm`).
+- **Guided capture with a live, eye-following oval:** The live camera preview shows an oval that locks onto the eye whose lower-lid conjunctiva is reddest, rotates with head tilt (MediaPipe only), and changes colour to show whether the conjunctiva is clear. A configurable hold countdown (default 5 seconds) runs during recording.
+- **Video recording:** The full hold period is recorded as a video (`.webm`, VP8, up to 8 Mbit/s).
 - **Eye-based frame analysis:** Frames are judged on the **eye region** (the lower-eyelid conjunctiva strip), not on the whole oval. In each analysed frame both eyes are detected and the conjunctiva strip of each is measured for redness, sharpness, brightness and glare.
 - **Red-visibility gate:** Only frames where the red palpebral conjunctiva is most visible (close to the best in the whole video) are eligible, so a sharp or dark frame without visible conjunctiva can never win.
 - **Three candidate frames per capture:** The best-**sharpness** frame, the best-**exposure** frame and the lowest-**glare** frame are all stored.
-- **Single best frame:** The best of the three candidates (highest overall conjunctiva score) becomes the final frame.
+- **Single best frame:** The best of the three candidates (candidates that pass all checks first, then highest combined conjunctiva score) becomes the final frame.
 - **Values printed on the images:** Sharpness, brightness, glare (and red conjunctiva coverage) are printed on the final frame and on each candidate, together with the eye oval.
-- **Single-eye crop:** The selected eye is cropped from the full-resolution frame (with padding) and saved clean (no text) alongside the full frame.
+- **Single-eye crop:** The selected eye is cropped from the full-resolution frame (with padding) and saved clean (no text, no oval) alongside the full frame.
 - **Automatic eye-detector fallback:** MediaPipe FaceMesh (if available), then the OpenCV Haar eye detector. An optional last-resort guess from the oval halves is available with `--allow-guess`.
 - **Honest failure reporting:** If no eye is found in any frame, the review screen says so and no crop is saved. The three candidates are then chosen from the whole static oval and labelled accordingly.
 - **Review screen:** Shows the final annotated frame, the three candidates as thumbnails (selected one highlighted, with their values), the cropped eye (small overlay) and a metrics line, so the user can choose **Keep** or **Discard**.
@@ -69,7 +69,7 @@ playwright==1.64.0
 mediapipe==1.1.1
 ```
 
-> **MediaPipe is optional.** The tool checks at startup whether MediaPipe provides the FaceMesh API it uses. If MediaPipe is missing or incompatible, the console prints `[info] mediapipe (legacy solutions API) not available -> using Haar eye detection.` and the tool continues with the Haar detector. If `mediapipe` fails to install, remove that line from `requirements.txt`.
+> **MediaPipe is optional.** At startup the tool checks whether the installed `mediapipe` package exposes the legacy `solutions` API (which provides FaceMesh). If MediaPipe is missing or incompatible, the console prints `[info] mediapipe (legacy solutions API) not available -> using Haar eye detection.` and the tool continues with the Haar detector. If `mediapipe` fails to install, remove that line from `requirements.txt`.
 
 ---
 
@@ -111,13 +111,13 @@ python capture_app.py --device <device_id> --distance <distance> --lighting <con
 | `--device` | Yes | Device label used for folder and file names (metadata only) | `pixel7`, `laptop1` |
 | `--distance` | Yes | Camera-to-eye distance label | `5cm`, `10cm` |
 | `--lighting` | Yes | Lighting condition label | `indoor`, `daylight`, `flash` |
-| `--duration` | No | Hold time in seconds | `5` |
+| `--duration` | No | Hold time in seconds (integer) | `5` |
 | `--out` | No | Output root directory | `dataset` |
 | `--stride` | No | Analyse every Nth frame (`1` = every frame, slower but most thorough) | `2` |
 | `--allow-guess` | No | If no eye is detected, guess eye regions from the oval halves. A guess is never marked `crop_ok`. Not used by the live oval | Flag (off) |
 | `--fake-camera` | No | Uses Chromium's simulated camera for testing without a physical webcam | Flag |
 
-> **Format Rule:** Do **not** use spaces in `--device`, `--distance`, or `--lighting` string values because they form part of filenames and paths.
+> **Format Rule:** Do **not** use spaces in `--device`, `--distance`, or `--lighting` string values because they form part of filenames and paths. The script does not check this for you.
 
 ### Examples
 
@@ -138,16 +138,18 @@ python capture_app.py --device laptop1 --distance 10cm --lighting indoor --strid
 
 ## User Guide
 
-1. Execute the launch command. A maximized Chromium browser window opens automatically (your primary system browser remains untouched and camera permissions are auto-granted).
+1. Execute the launch command. A maximized Chromium browser window opens automatically (your primary system browser remains untouched and camera permissions are auto-granted). The page requests a 1280x720 stream and prefers the rear-facing camera on phones; laptops and desktop webcams simply use the camera they have.
 2. Gently pull the lower eyelid down so the palpebral conjunctiva (the red/pink inner surface) is visible, and bring the eye into view at the designated distance. Light the face from the front and avoid a bright wall or window behind you.
 3. Watch the oval. It starts as a dashed white guide, then locks onto the eye (see the colour table below). Adjust the lid, angle and lighting until it turns green.
 4. Click **Start capture**.
 5. Hold steady while the countdown runs for the specified duration. The oval keeps following the eye.
 6. Wait for the analysis phase ("Analysing frames...").
-7. On the review screen, evaluate the final frame (values printed on it), the three candidate thumbnails (the selected one is highlighted), the cropped eye (small overlay in the bottom-right corner), and the metrics line:
-   - **Keep:** Saves the `.webm` video, the final `.png`, the three candidate `.png` files, the eye-crop `.png`, and writes a metadata record to `dataset.csv`.
-   - **Discard:** Purges temporary buffers without saving.
+7. On the review screen, evaluate the final frame (values printed on it), the three candidate thumbnails (bottom-left; the selected one is highlighted), the cropped eye (small overlay in the bottom-right corner), and the metrics line below the image:
+   - **Keep:** Saves the `.webm` video, the final `.png`, the three candidate `.png` files and the eye-crop `.png` (if an eye was found), and writes a metadata record to `dataset.csv`.
+   - **Discard:** Deletes the temporary files without saving.
 8. Repeat the process for additional captures. **Close the browser window when finished to terminate the script.**
+
+Only the most recent analysis is held pending. If you start a new capture without pressing Keep or Discard first, the earlier result is dropped.
 
 ### Live Oval Colours
 
@@ -161,9 +163,10 @@ python capture_app.py --device laptop1 --distance 10cm --lighting indoor --strid
 
 | Message | Meaning | Recommended action |
 |---|---|---|
-| "no eye could be found in any frame" | No eye was detected anywhere in the recording. No crop is produced; the best whole-oval frames are shown for reference. | Retake with the eye in view and well lit. |
-| "conjunctiva not clearly visible" | An eye was found but even the best conjunctiva strip failed the clarity check (low redness coverage, glare, or poor exposure). | Pull the lower lid down further, reduce glare, adjust lighting, retake. |
+| "Warning: no eye could be found in any frame. Retake?" | No eye was detected anywhere in the recording. No crop is produced; the best whole-oval frames are shown for reference. | Retake with the eye in view and well lit. |
+| "Warning: conjunctiva not clearly visible (pull the lower lid down, reduce glare). Keep or retake?" | An eye was found but even the best conjunctiva strip failed the clarity check (low redness coverage, glare, or poor exposure). | Pull the lower lid down further, reduce glare, adjust lighting, retake. |
 | "Best frame selected (from `<criterion>`). Keep it?" | The conjunctiva strip passed all checks. The criterion is the candidate (sharpness, exposure or glare) that won. | Keep. |
+| "Error: ..." | Analysis failed (for example the recording could not be decoded). The **Start capture** button reappears. | Retake. |
 
 ---
 
@@ -192,49 +195,51 @@ The matching `image_id` is applied to the video, the final image, the candidates
 
 The final frame in `images/` and the three frames in `candidates/` are **annotated**:
 
-- A title line (`FINAL BEST (<criterion>)` or `Best <criterion>`), with `[SELECTED]` on the winner.
+- A title line (`FINAL BEST (<criterion>)` on the final frame, `Best <criterion>` on candidates), with `[SELECTED]` on the winner.
 - `Sharpness`, `Brightness`, `Glare` and `Red conj.` values measured on the conjunctiva strip.
 - The eye oval: green if the conjunctiva passed the clarity check, amber otherwise.
-- If no eye was found: the line `no eye found - whole-oval metrics`, and the values describe the whole static oval.
+- If no eye was found: the line `no eye found - whole-oval metrics`, no oval, and the values describe the whole static oval.
 
 | Value | Definition |
 |---|---|
 | Sharpness | Laplacian variance inside the conjunctiva strip (higher = sharper) |
 | Brightness | Mean gray level (0 to 255) inside the strip |
-| Glare | Percentage of strip pixels that are very bright and unsaturated |
+| Glare | Percentage of strip pixels that are very bright (V > 240) and unsaturated (S < 40) |
 | Red conj. | Percentage of strip pixels classified as red/pink conjunctiva |
 
 > **Use the crops for analysis.** The annotation covers part of the full frame, so the images in `images/` and `candidates/` are for review, not for pixel-level analysis. The files in `crops/` are saved clean (no text, no oval).
 
 ### `dataset.csv` Format
 
-Each saved capture appends a row to `dataset.csv`:
+Each saved capture appends a row to `dataset.csv`. Paths are written with forward slashes and are relative to the folder you launched the script from (they start with the `--out` value, `dataset/` by default).
 
 | Column | Description |
 |---|---|
 | `image_id` | Unique identifier (filename without extension) |
-| `video_path` | Relative path to the saved `.webm` video |
-| `image_path` | Relative path to the final annotated `.png` |
-| `sharpness_path` | Relative path to the best-sharpness candidate |
-| `exposure_path` | Relative path to the best-exposure candidate |
-| `glare_path` | Relative path to the lowest-glare candidate |
-| `crop_path` | Relative path to the single-eye `.png` crop (empty if no eye was found) |
+| `video_path` | Path to the saved `.webm` video |
+| `image_path` | Path to the final annotated `.png` |
+| `sharpness_path` | Path to the best-sharpness candidate |
+| `exposure_path` | Path to the best-exposure candidate |
+| `glare_path` | Path to the lowest-glare candidate |
+| `crop_path` | Path to the single-eye `.png` crop (empty if no eye was found) |
 | `best_criterion` | Which candidate became the final frame: `sharpness`, `exposure` or `glare` |
 | `best_frame_idx` | 1-based position of the final frame in the decoded recording |
 | `sharpness` | Sharpness of the final frame (Laplacian variance in the strip) |
 | `brightness` | Mean gray level (0 to 255) of the final frame's strip |
 | `glare` | Glare fraction (0 to 1) of the final frame's strip |
-| `eye_side` | `image_left`, `image_right`, or `single` (see note below) |
-| `crop_method` | Detector used: `mediapipe`, `haar`, or `oval_halves` |
-| `conj_coverage` | Fraction (0 to 1) of the lower-lid ROI that is red/pink |
-| `conj_score` | Combined conjunctiva clarity score (0 to 1, higher is better) |
-| `crop_ok` | `True` if the conjunctiva passed the clarity check, otherwise `False` |
+| `eye_side` | `image_left`, `image_right`, or `single` (see note below); empty if no eye was found |
+| `crop_method` | Detector used: `mediapipe`, `haar`, or `oval_halves`; empty if no eye was found |
+| `conj_coverage` | Fraction (0 to 1) of the lower-lid ROI that is red/pink; empty if no eye was found |
+| `conj_score` | Combined conjunctiva clarity score (0 to 1, higher is better); empty if no eye was found |
+| `crop_ok` | `True` if the conjunctiva passed the clarity check, otherwise `False`; empty if no eye was found |
 
 ```csv
 image_id,video_path,image_path,sharpness_path,exposure_path,glare_path,crop_path,best_criterion,best_frame_idx,sharpness,brightness,glare,eye_side,crop_method,conj_coverage,conj_score,crop_ok
 laptop1_10cm_indoor_20261014T101500,dataset/laptop1/10cm/indoor/videos/laptop1_10cm_indoor_20261014T101500.webm,dataset/laptop1/10cm/indoor/images/laptop1_10cm_indoor_20261014T101500.png,dataset/laptop1/10cm/indoor/candidates/laptop1_10cm_indoor_20261014T101500_sharpness.png,dataset/laptop1/10cm/indoor/candidates/laptop1_10cm_indoor_20261014T101500_exposure.png,dataset/laptop1/10cm/indoor/candidates/laptop1_10cm_indoor_20261014T101500_glare.png,dataset/laptop1/10cm/indoor/crops/laptop1_10cm_indoor_20261014T101500_eye.png,sharpness,64,182.400,131.200,0.00000,image_left,mediapipe,0.612,0.540,True
 ```
 
+> **No-eye rows:** When no eye was found in any frame, `crop_path`, `eye_side`, `crop_method`, `conj_coverage`, `conj_score` and `crop_ok` are empty. The `sharpness`, `brightness` and `glare` columns are then measured on the whole static oval, not on a conjunctiva strip, so they are not comparable with rows that have an eye.
+>
 > **Eye side note:** `eye_side` is relative to the image, not the patient. `image_left` is the patient's right eye. The camera is not mirrored in the saved files. When the Haar detector finds only one eye, `eye_side` is `single`.
 >
 > **Candidates can differ in eye and frame:** each of the three candidates is chosen independently, so they may come from different frames, and even from different eyes. If one frame wins two criteria, it is saved twice under different candidate names.
@@ -249,32 +254,40 @@ Frames are selected by looking at the **eye**, not the whole oval. This avoids b
 
 ### Stage 1: Frame sampling (pass 1)
 
-The recording is decoded and every `--stride`-th frame (default every 2nd) is analysed. Colour conversions are done once per frame and shared by both eyes. In this pass only the measurements are kept (no images), so memory use stays low.
+The recording is decoded and every `--stride`-th frame (default every 2nd) is analysed. Colour conversions (gray, LAB, HSV) are done once per frame and shared by both eyes. In this pass only the measurements are kept (no images), so memory use stays low.
 
 ### Stage 2: Eye detection
 
-For each analysed frame, both eyes are located using the first method that succeeds:
+For each analysed frame, the eyes are located using the first method that succeeds:
 
 | Order | Method (`crop_method`) | Notes |
 |---|---|---|
 | 1 | **MediaPipe FaceMesh** (`mediapipe`) | Exact upper and lower eyelid landmarks. The conjunctiva strip and the oval follow head tilt. Only used if MediaPipe's FaceMesh API is available, and needs most of a face in view. |
-| 2 | **OpenCV Haar eye cascade** (`haar`) | Detects eye boxes; the region directly below each box is used as the conjunctiva ROI. Used when MediaPipe is unavailable or finds no face. The oval is level (no tilt). |
-| 3 | **Oval halves** (`oval_halves`) | Only with `--allow-guess`: left and right halves of the guide oval are treated as the two eyes. Never marked `crop_ok`. |
+| 2 | **OpenCV Haar eye cascade** (`haar`) | Detects up to the two largest eye boxes. The strip overlapping the lower part of each box and extending below it is used as the conjunctiva ROI (see Stage 3). Used when MediaPipe is unavailable or finds no face. The oval is level (no tilt). |
+| 3 | **Oval halves** (`oval_halves`) | Only with `--allow-guess`: the lower parts of the left and right halves of the guide oval are treated as the two eyes. Never marked `crop_ok`, and only used for candidates if no real detection exists in the recording. |
 
 If no method finds an eye in a frame, that frame is skipped.
 
 ### Stage 3: Conjunctiva measurements
 
-For each eye, a **lower-eyelid ROI** (a strip directly below the lower-lid margin, about 0.5x the eye width tall) is measured. A second strip further down (skin) is used as a reference:
+For each eye, a **lower-eyelid ROI** is measured, and a second strip further down (skin) is used as a reference:
+
+| Detector | ROI (conjunctiva strip) | Reference (skin) strip |
+|---|---|---|
+| MediaPipe | Polygon between the lower-lid margin and the same margin shifted "down the face" by `CONJ_BAND_FRAC` (0.5) x eye width | The next band of the same height below the ROI |
+| Haar | Rectangle as wide as the eye box, from 55% to 150% of the box height (measured from the box top) | Rectangle of the same width, 0.9 x box height, directly below the ROI |
+| Oval halves | Lower half of that side of the oval | None |
 
 | Component | Method | Default Parameter |
 |---|---|---|
-| **Redness coverage** | Fraction of ROI pixels with LAB `a*` above `max(CONJ_A_MIN, skin_a* + CONJ_A_DELTA)` and not too dark. The skin reference prevents plain reddish skin from counting as conjunctiva. | `CONJ_A_MIN = 145`, `CONJ_A_DELTA = 6`, `CONJ_L_MIN = 40` |
+| **Redness coverage** | Fraction of ROI pixels with LAB `a*` above `max(CONJ_A_MIN, skin_a* + CONJ_A_DELTA)` and not too dark. `skin_a*` is the median `a*` of the reference strip (used only if it has at least 300 pixels). This prevents plain reddish skin from counting as conjunctiva. | `CONJ_A_MIN = 145`, `CONJ_A_DELTA = 6`, `CONJ_L_MIN = 40` |
 | **Sharpness** | Laplacian variance inside the ROI | `CONJ_SHARP_REF = 100` (used to normalize the score) |
 | **Glare** | Bright, low-saturation pixel fraction inside the ROI | Penalty in score; limit `CONJ_GLARE_MAX = 0.02` |
 | **Brightness / exposure** | Mean gray level inside the ROI | `BRIGHT_MIN = 70` to `BRIGHT_MAX = 190` (score halved if outside); ideal value `BRIGHT_TARGET = 130` |
 
-The combined score is `coverage x normalized sharpness x glare penalty x exposure factor`.
+An ROI smaller than 500 pixels is treated as invalid (score 0).
+
+The combined score is `coverage x min(sharpness / CONJ_SHARP_REF, 1) x (1 - min(glare x 20, 0.8)) x exposure factor`, where the exposure factor is 1 inside the brightness range and 0.5 outside it.
 
 `crop_ok` is `True` only if coverage is at least `CONJ_MIN_COVERAGE` (0.25), glare is within `CONJ_GLARE_MAX`, and exposure is within range.
 
@@ -293,20 +306,20 @@ The combined score is `coverage x normalized sharpness x glare penalty x exposur
 
 ### Stage 5: Choosing the single best frame (pass 2)
 
-Only the three winning frames are read again from the video. The **final frame** is the candidate with the highest combined score, with candidates that pass all checks (`crop_ok = True`) always preferred over those that do not. The crop is taken from that full-resolution frame with 30% padding (`CROP_PAD`). The metrics shown in the UI and written to the CSV describe the winning conjunctiva strip.
+Only the winning frames are read again from the video. The **final frame** is the candidate with the highest combined score, with candidates that pass all checks (`crop_ok = True`) always preferred over those that do not. The crop is taken from that full-resolution frame using the detector's eye box, which already includes 30% padding (`CROP_PAD`). The metrics shown in the UI and written to the CSV describe the winning conjunctiva strip.
 
-**No-eye fallback:** If no eye is found in any frame, the three candidates are chosen the same way (sharpness / exposure / glare) from the whole static oval (using `GLARE_MAX_FRAC` and `CLIP_MAX_FRAC` for the exposure and clipping checks), shown for reference, and no crop is saved.
+**No-eye fallback:** If no eye is found in any frame (or, very rarely, a winning frame cannot be re-read in pass 2), the three candidates are chosen the same way (sharpness / exposure / glare) from the whole static oval (using `GLARE_MAX_FRAC` and `CLIP_MAX_FRAC` for the exposure and clipping checks), shown for reference, and no crop is saved. The final frame is then the candidate with the highest oval score, and none of them is marked as passing the clarity check.
 
 ### Dynamic oval (live tracking)
 
-While the camera preview is open, the browser sends a small copy of the live frame (640 px wide) to Python about 10 times per second. Python detects the eyes, measures the conjunctiva strip of each, and returns the oval of the eye with the **highest red coverage** (ties broken by the combined score).
+While the camera preview is open, the browser sends a small copy of the live frame (640 px wide) to Python in a continuous loop (each request is sent after the previous answer arrives, so the rate depends on CPU speed and the detector in use). Python detects the eyes, measures the conjunctiva strip of each, and returns the oval of the eye with the **highest red coverage** (ties broken by the combined score).
 
 | Detector | Oval shape |
 |---|---|
 | MediaPipe | Fitted to both eyelid outlines plus the top `OVAL_BAND_FRAC` (35%) of the lower-lid strip, scaled by `EYE_OVAL_SCALE` (1.15), and rotated to match head tilt |
 | Haar | A level landscape oval centred on the detected eye (slightly low, to include the top of the lower lid) |
 
-The oval is smoothed over time (`SMOOTH`), snaps to the new position if it jumps to the other eye, and disappears after `LOST_MAX` consecutive missed frames, when the dashed white hint returns. The same oval is drawn on the saved annotated images.
+The oval is smoothed over time (`SMOOTH`), snaps to the new position if it jumps to the other eye, and is dropped once more than `LOST_MAX` consecutive frames have missed the eye (with the default of 6, on the 7th miss), when the dashed white hint returns. The same oval is drawn on the saved annotated images.
 
 The oval **follows the eye shape** (eyelid landmarks), not the red pixels. Redness decides *which* eye gets the oval and its colour.
 
@@ -335,8 +348,6 @@ CONJ_GLARE_MAX = 0.02
 CONJ_SHARP_REF = 100.0
 RED_REL_GATE = 0.80            # frames must reach this share of the best red coverage to be eligible
 CROP_PAD = 0.30
-
-# Dynamic oval
 EYE_OVAL_SCALE = 1.15          # margin around the eye (higher = looser oval)
 OVAL_BAND_FRAC = 0.35          # how far the oval reaches into the lower lid (0 = eye only, 1 = whole strip)
 ```
@@ -364,7 +375,7 @@ After each analysis the console prints the selection result, for example:
        candidates: sharpness@64 S=182.4 B=131 G=0.00% R=61% | exposure@72 S=140.1 B=129 G=0.20% R=58% | glare@80 S=96.0 B=118 G=0.00% R=55%
 ```
 
-The format is `<candidate>@<frame number>` followed by sharpness (S), brightness (B), glare (G) and red coverage (R). `eye=.../mediapipe` or `.../haar` tells you which detector was used.
+The format is `<candidate>@<frame number>` followed by sharpness (S), brightness (B), glare (G) and red coverage (R). `eye=.../mediapipe` or `.../haar` tells you which detector was used. If no eye was found the first line ends with `eye=NOT FOUND`. Saving and discarding print `[saved] <image_id>` and `[discarded]`.
 
 ---
 
@@ -379,7 +390,7 @@ python capture_app.py --device phone_webcam --distance 10cm --lighting indoor
 
 All runs append to the same central `dataset/dataset.csv`. Before executing production data collection, delete test subdirectories (e.g., `dataset/test/`) and remove associated `test_` entries from `dataset.csv`.
 
-After a session, check the `crop_method`, `crop_ok` and `conj_coverage` columns to see which detector was used and how many crops passed the clarity check.
+After a session, check the `crop_method`, `crop_ok` and `conj_coverage` columns to see which detector was used and how many crops passed the clarity check. Rows with an empty `crop_method` are captures where no eye was found.
 
 ---
 
@@ -388,13 +399,13 @@ After a session, check the `crop_method`, `crop_ok` and `conj_coverage` columns 
 | Problem | Cause | Solution |
 |---|---|---|
 | `ModuleNotFoundError: No module named 'playwright'` | Playwright is not installed in the active environment. | Run `python -m pip install -r requirements.txt`. On Windows, ensure you are using the correct Python executable (`py -m pip ...`). |
-| `playwright: command not found` | Chromium browser binary missing. | Execute `python -m playwright install chromium`. |
+| `playwright: command not found` / browser does not launch | Chromium browser binary missing. | Execute `python -m playwright install chromium`. |
 | `Camera error: NotFoundError` | No webcam detected or hardware is locked by another process (Zoom, Teams). | Close conflicting applications or run with `--fake-camera` to verify app logic. |
 | `Camera error: NotAllowedError` | OS privacy permissions blocking browser access. | Enable camera permissions: **Windows Settings → Privacy → Camera** or **macOS System Settings → Privacy & Security → Camera**. |
-| `No frames could be decoded` | Empty recording buffer or corrupted video stream. | Ensure OpenCV is installed (includes FFmpeg binaries). Retry the recording. |
+| `Error: No frames could be decoded from the recording.` | Empty recording buffer or corrupted video stream. | Ensure OpenCV is installed (includes FFmpeg binaries). Retry the recording. |
 | Permission / File-lock errors | System locking files inside synchronized folders. | Relocate project folder out of OneDrive or Google Drive to a standard local path. |
 | `ImportError` or odd errors involving `cv2` | `opencv-python` and `opencv-contrib-python` conflict. | Use a clean virtual environment, or uninstall both and install only `opencv-contrib-python`. |
-| Startup message: `mediapipe ... not available` | MediaPipe is not installed, or no longer provides the FaceMesh API. | Expected fallback. The tool uses the Haar detector. No action needed. |
+| Startup message: `mediapipe ... not available` | MediaPipe is not installed, or no longer provides the legacy FaceMesh (`solutions`) API. | Expected fallback. The tool uses the Haar detector. No action needed. |
 | `[warn] mediapipe failed: ...` in the console | MediaPipe raised an error. | The tool falls back to Haar. Printed once per session; no action needed unless crops are consistently poor. |
 | Startup message: `dataset.csv ... renamed to dataset_old_...csv` | The existing CSV used an older column layout. | Expected. The old file is kept untouched and a new `dataset.csv` was started. Merge them manually if needed. |
 | Oval stays dashed white | No eye is detected in the live view. | Bring the eye into view, improve lighting, move slightly farther back so the eye and some surrounding face are visible. |
@@ -420,7 +431,7 @@ browser = p.chromium.launch(channel="chrome", headless=False, args=chrome_args)
 
 - **Platform Target:** Designed for desktop environments; mobile devices are supported exclusively as webcam feeds (via DroidCam, Iriun, etc.).
 - **Container Format:** Video files are saved as `.webm` as generated by the browser's native `MediaRecorder` API.
-- **Processing Time:** Eye detection runs on every analysed frame, so longer recordings, `--stride 1`, and MediaPipe increase processing time. The recording is read a second time to fetch the three winning frames.
+- **Processing Time:** Eye detection runs on every analysed frame, so longer recordings, `--stride 1`, and MediaPipe increase processing time. The recording is read a second time to fetch the winning frames.
 - **Detector precision:** MediaPipe gives exact eyelid landmarks, but it needs most of a face in view. At very close range the Haar fallback is used, where crop boundaries, the conjunctiva strip and the oval are approximate and the oval cannot follow head tilt.
 - **Oval follows the eye, not the red area:** The live oval is placed from eyelid landmarks (or the Haar box). Redness only selects which eye is shown and the oval's colour.
 - **Heuristic conjunctiva check:** Clarity is estimated from colour, sharpness, glare, and exposure. It does not verify clinically that the palpebral conjunctiva is everted, and thresholds are not validated across skin tones or cameras.
@@ -429,4 +440,5 @@ browser = p.chromium.launch(channel="chrome", headless=False, args=chrome_args)
 - **Backlit or very dark scenes:** Under poor lighting the red coverage is underestimated, so frame ranking becomes less reliable. Good, frontal lighting matters more than any threshold.
 - **Single eye per capture:** Only one eye crop is saved per capture; the other eye is visible only in the full-frame images.
 - **Annotated full frames:** Images in `images/` and `candidates/` carry printed text and the oval; use the clean files in `crops/` for pixel-level analysis.
+- **No-eye captures are not comparable:** When no eye is found, the stored metrics come from the whole static oval, and no crop or eye metadata is written.
 - **Camera aspect ratio:** The live oval is mapped correctly for any camera aspect ratio, but the dashed search hint is drawn in preview coordinates while the no-eye fallback mask uses frame coordinates, so the two can differ slightly when the camera is not 16:9 (the preview uses `object-fit: cover`).
