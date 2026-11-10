@@ -11,7 +11,7 @@
 opencv-python==4.11.0.86
 
 # Array operations for masks and scoring
-numpy==2.1.2
+numpy>=1.26.0,<2.0.0
 
 # Browser-based live camera UI (Chromium) bridged to Python
 playwright==1.64.0
@@ -23,4 +23,4 @@ playwright==1.64.0
 # cv2 import errors, run:
 #   python -m pip uninstall -y opencv-python opencv-contrib-python
 #   python -m pip install opencv-contrib-python
-mediapipe==1.1.1
+mediapipe>=0.10.9,<0.11.0
